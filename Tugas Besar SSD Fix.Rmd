@@ -1,0 +1,239 @@
+---
+title: "Tugas Besar SSD Fix"
+author: "Sains Data Institut Teknologi Sumatera"
+date: "2023-05-10"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Tugas Besar SSD
+
+Kelompok 6:
+
+Anggota :
+
+\\- A Rafi Paringgom Iwari_121450039
+
+\\- Husni Na'fa Mubarok_121450078
+
+\\- Anisa Dini Amalia_121450081
+
+\\- Vanessa Olivia Rose_121450108
+
+\\- Lia Alyani_121450138
+
+## Deskripsi Data
+
+Silahkan Unduh dataset di bawah ini: <https://www.kaggle.com/datasets/mssmartypants/rice-type-classification>
+
+## Atribut Data
+
+all attributes are numeric variables and they are listed bellow:
+
+-   id
+
+-   Area
+
+-   MajorAxisLength
+
+-   MinorAxisLength
+
+-   Eccentricity
+
+-   ConvexArea
+
+-   EquivDiameter
+
+-   Extent
+
+-   Perimeter
+
+-   Roundness
+
+-   AspectRation
+
+-   Class
+
+1.  Panggil Package berikut:
+
+```{r}
+library(tidyverse)
+library(mlr3verse)
+library(mlr3tuning)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(DataExplorer)
+```
+
+2.  Set direktori dan lakukan mutate terhadap dataset agar menjadi numerik
+
+```{r}
+data <- read.csv("Rice-Gonen andJasmine.csv")
+data <- data %>% mutate(across(where(is.integer),as.numeric))
+```
+
+3.  Cek dataset dengan Glimpse
+
+```{r}
+glimpse(data)
+```
+
+4.  Ubah beberapa variabel menjadi factor
+
+```{r}
+data$Class <- ifelse(data$Class == "Gonen", 0, 1)
+data$Class <- as.factor(data$Class)
+```
+
+5.  Buatlah plot dengan ggplot
+
+```{r}
+plot_intro(data = data)
+```
+
+```{r}
+plot_histogram(data = data,nrow=3,ncol = 3,
+               geom_histogram_args = list(fill="steelblue"),
+               ggtheme = theme_bw()
+               )
+```
+
+```{r}
+distribusi <- ggplot(data, aes(x= Class))+ geom_bar()
+distribusi + labs(x= "Distribusi Jenis Beras")
+```
+
+6.  Hapus nilai NA
+
+```{r}
+data <- data %>% na.omit()
+```
+
+7.  Buatlah task klasifikasi
+
+```{r}
+task_data = TaskClassif$new(id="Jenis Beras",
+                             backend = data,
+                             target = "Class",positive ="1")
+```
+
+8.  Buatlah Learner Logistic Regression
+
+```{r}
+learner1 = lrn("classif.log_reg", predict_type = "prob")
+learner1
+```
+
+9.  Lakukan resampling Crossvalidation, dengan folds 4
+
+```{r}
+resampling_cv = rsmp("cv", folds = 4)
+rr = resample(task = task_data, learner = learner1, resampling = resampling_cv)
+rr$aggregate(msr("classif.acc"))
+```
+
+Holdout
+
+```{r}
+resampling_h = rsmp("holdout", ratio = .8)
+resampling_h$instantiate(task_data)
+train_h = resampling_h$train_set(1)
+test_h= resampling_h$test_set(1)
+rr = resample(task = task_data, learner = learner1, resampling = resampling_h)
+rr$aggregate(msr("classif.acc"))
+```
+
+Boostrap
+
+```{r}
+resampling_b = rsmp("bootstrap")
+
+rr = resample(task = task_data, learner = learner1, resampling = resampling_b)
+rr$aggregate(msr("classif.acc"))
+```
+
+Karena Model terbaik dengan akurasi 100% adalah model dengan metode holdout, maka kita gunakan metode tersebut.
+
+```{r}
+splits = mlr3::partition(task_data, ratio = 0.8)
+
+learner1$train(task_data, splits$train)
+```
+
+```{r}
+pred = learner1$predict(task_data, splits$test)
+```
+
+```{r}
+pred$confusion
+```
+
+```{r}
+autoplot(pred)
+```
+
+ROC
+
+```{r}
+library(mlr)
+library(pROC)
+probs <- as.data.frame(pred)$response
+```
+
+```{r}
+labels <- task_data$truth(splits$test)
+labels <- as.numeric(labels)
+probs <- as.numeric(probs)
+roc_data <- data.frame(labels,probs)
+```
+
+```{r}
+roc_curve <- roc(roc_data$labels, roc_data$probs)
+```
+
+```{r}
+plot(roc_curve, main="ROC Curve", xlab="False Positive Rate", ylab="True Positive Rate")
+```
+
+```{r}
+learner1$train(task = task_data)
+summary(learner1$model)
+```
+
+Setiap variable bebas signifikan mempengaruhi variable tak bebas
+
+```{r}
+coef(learner1$model)
+```
+
+```{r}
+# Menghitung odds ratio
+odds_ratio <- exp(predict(learner1$model, task_data[1:2]))
+
+```
+
+### Prediksi
+
+```{r}
+library(ggplot2)
+library(ggridges)
+
+
+# membuat plot menggunakan ggplot dan ggridges
+task_data$prob_data<- learner1$predict(task_data, splits$test)
+ggplot(task_data, aes(x = prob_data)) + 
+  geom_density_ridges(scale = 3, alpha = 0.6, color = "blue", fill = "blue") + 
+  geom_point(aes(y = 0), color = "red") +
+  labs(title = "Distribusi Peluang Data Prediksi Jenis Beras") + 
+  theme_classic()
+
+
+
+
+```
+
+```{r}
+pred_data <- factor(ifelse(pred$confusion > 0.5, "Jasmine", "Gonen"))
+```
